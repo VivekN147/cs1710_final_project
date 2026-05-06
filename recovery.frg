@@ -1,4 +1,5 @@
 #lang forge/temporal
+option run_sterling "recovery_visual.js"
 
 // basic properties to model
 //  1. Redo completeness
