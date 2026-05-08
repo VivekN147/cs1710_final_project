@@ -415,8 +415,8 @@ test suite for txnTableConsistent {
                 r.txn = t
                 r.recType = Commit
                 inLog[r]
+                txnTableConsistent
             }
-            txnTableConsistent
         } for 3 Int, exactly 2 Page, exactly 2 Transaction, exactly 4 LogRecord is unsat
     }
 }

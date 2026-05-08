@@ -1,5 +1,7 @@
 #lang forge/temporal
 option run_sterling "recovery_visual.js"
+option max_tracelength 15
+option min_tracelength 15
 
 // in the future, we can model
 //  1. Liveness properties - does the recovery end
@@ -479,7 +481,7 @@ pred clrChaining {
 
 // The transaction table correctly identifies every transaction that committed (winner) vs was still active (loser)
 pred txnTableConsistent {
-    System.phase = Redo or System.phase = Undo or System.phase = Done implies {
+    (System.phase = Redo or System.phase = Undo or System.phase = Done) implies {
         all t: Transaction | {
             // If a Commit record exists for t, it must be a winner
             (some r: LogRecord | inLog[r] and r.txn = t and r.recType = Commit)
@@ -493,7 +495,7 @@ pred txnTableConsistent {
 
 // The dirty page table's recLSN for a page is the first LSN that dirtied the page since its last flush
 pred dirtyPageTableConsistent {
-    System.phase = Redo or System.phase = Undo or System.phase = Done implies {
+    (System.phase = Redo or System.phase = Undo or System.phase = Done) implies {
         all p: Page | some Memory.dirtyPageTable[p] implies {
             // recLSN must be <= every Update LSN for this page that is post-flush
             all r: LogRecord |
@@ -607,23 +609,53 @@ pred validTrace {
     }
 }
 
+pred uniqueLSNs {
+    all disj r1, r2: LogRecord | r1.lsn != r2.lsn
+}
+
+pred interestingTrace {
+    // Force a winner by requiring a Committed transaction state during Normal phase
+    // before the crash — don't reference commitTransaction directly
+    some t: Transaction | {
+        eventually (System.phase = Normal and t.tState = Committed)
+    }
+
+    // Force a loser — some transaction still Active when Analysis begins
+    some t: Transaction | {
+        eventually (System.phase = Analysis and t.tState = Active)
+    }
+
+    // Force these to be different transactions
+    some disj t1, t2: Transaction | {
+        eventually (System.phase = Normal and t1.tState = Committed)
+        eventually (System.phase = Analysis and t2.tState = Active)
+    }
+
+    // Force update records to exist for both transactions
+    some disj r1, r2: LogRecord | {
+        r1.recType = Update
+        r2.recType = Update
+        r1.txn != r2.txn
+    }
+
+    // Force memory to be non-empty after redo
+    eventually (System.phase = Undo and some Memory.memPages)
+}
+
 pred recoveryTraces {
     init
-
+    uniqueLSNs  // add here so it always applies
     validTrace
-
     walAlwaysHolds
     recoveryCorrect
     durabilityHolds
     atomicityHolds
     structuralInvariants
     livenessHolds
-
     finish
 }
 
-//==========================================
-// RUN
-//==========================================
-
-run { recoveryTraces } for 3 Int, exactly 2 Page, exactly 2 Transaction, exactly 4 LogRecord
+run {
+    recoveryTraces
+    interestingTrace
+} for 4 Int, exactly 2 Page, exactly 2 Transaction, exactly 6 LogRecord
